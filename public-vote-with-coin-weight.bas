@@ -1,7 +1,8 @@
 /* Poll Smart Contract in DVM-BASIC  
    Version 2.0
    MIT License
-   Created by Cryptolemico :)
+Original work by Cryptolemico :)
+Public vote with coinweight by @plrspro
 */
 
 Function Initialize() Uint64
@@ -32,7 +33,7 @@ Function ClaimOwnership() Uint64
 End Function
 
 
-Function New_Poll(name String) Uint64	
+Function New_Poll(name String, public_pool Bool) Uint64	
 	10  IF EXISTS(name) == 0 THEN GOTO 20
 	11  PRINTF "Poll name already exist!"
 	12  RETURN 1	
@@ -50,9 +51,13 @@ Function New_Poll(name String) Uint64
 	36  STORE(name + "_block_topoheight",BLOCK_TOPOHEIGHT())
 	37  STORE(name + "_closed",0)
 	38  STORE(name + "_force_closing",0)
-	39  STORE(name + "_close_at_block",0) //if 0 no time limit	
-	40  PRINTF "New poll %s created!" name
-	41  RETURN 0
+	39  STORE(name + "_force_closed",0)
+	40  STORE(name + "_close_at_block",0) //if 0 no time limit	
+	41  STORE(name + "_public", public_pool)
+	42  STORE(name + "_vote_yes_weight",0)
+	43  STORE(name + "_vote_no_weight",0)
+	44  PRINTF "New poll %s created!" name
+	45  RETURN 0
 End Function 
 
 
@@ -91,8 +96,9 @@ Function Close_Poll(name String) Uint64
 	40  IF LOAD(name + "_force_closing") == 0 THEN GOTO 50
 	41  STORE(name + "_close_at_block",BLOCK_HEIGHT())
 	42  STORE(name + "_closed",1)
-	43  PRINTF "Force closing poll... "
-	44  RETURN 0
+	43  STORE(name + "_force_closed",1)
+	44  PRINTF "Force closing poll... "
+	45  RETURN 0
 
 	50  IF LOAD(name + "_close_at_block") > 0 THEN GOTO 60
 	51  PRINTF "Poll ongoing. No blockHeight set!"
@@ -111,29 +117,26 @@ Function Close_Poll(name String) Uint64
 End Function 
 
 
-Function Force_Closing_Poll (name String) Uint64
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
-
+Function Force_Closing_Poll (name String, reasoning String) Uint64
 	20  IF ADDRESS_RAW(LOAD("owner_addr")) == ADDRESS_RAW(SIGNER()) THEN GOTO 30
-	21  PRINTF "You are not allowed to rename the poll!"
-	21  RETURN 1	
+	21  PRINTF "You are not allowed to force close the poll!"
+	22  RETURN 1	
 
-	30  Close_Poll(name)
-	31  PRINTF "Poll closed!"
-	32  RETURN 0
+	30  STORE(name + "_force_closing",1)															
+	31  Close_Poll(name)
+	32  STORE(name + "_force_close_reason", 1)												
+	33  STORE(name + "_force_closing",0)	
+	34  PRINTF "Poll closed!"
+	35  RETURN 0
 End Function 
 
 
 Function Rename_Poll(name String) Uint64
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 
 	20  IF ADDRESS_RAW(LOAD("owner_addr")) == ADDRESS_RAW(SIGNER()) THEN GOTO 30
 	21  PRINTF "You are not allowed to rename the poll!"
-	21  RETURN 1	
+	22  RETURN 1	
 
 	30  STORE(name + tmp_poll_number, name)	
 	31  PRINTF "Poll renamed: %s" name	
@@ -142,26 +145,26 @@ End Function
 
 
 Function Show_Results(name String) Uint64
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 
 	20  IF LOAD(name + "_closed") == 0 THEN GOTO 30
 	21  PRINTF "This poll is closed /!\"
 	22  PRINTF "Poll closed at block %d" LOAD(name + "_close_at_block")
 
-	30  PRINTF "Name of pool: %s" LOAD(name + "_name")
-	31  PRINTF "Total of voters: %d" LOAD(name + "_voter_counter")
-	32  PRINTF "Number of people voted Yes: %d" LOAD(name + "_vote_yes")
-	33  PRINTF "Number of people voted No: %d" LOAD(name + "_vote_no")
-	34  RETURN 0
+	30  IF LOAD(name + "_force_closed") == 0 THEN GOTO 40
+	31  PRINTF "This poll is force closed by owner (please review legitimacy!) /!\"
+	32  PRINTF "reasoning behind force close %d" LOAD(name + "_force_close_reason")																
+																		
+	40  PRINTF "Name of pool: %s" LOAD(name + "_name")
+	41  PRINTF "Total of voters: %d" LOAD(name + "_voter_counter")
+	42  PRINTF "Number of people voted Yes: %d" LOAD(name + "_vote_yes")
+	43  PRINTF "Number of people voted No: %d" LOAD(name + "_vote_no")
+	44  RETURN 0
 End Function 
 
 
 Function Add_Voter(name String, voter String) Uint64 
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 
 	20  IF IS_ADDRESS_VALID(voter) == 1 THEN GOTO 30
     	21  PRINTF "Invalid voter address!"
@@ -191,9 +194,7 @@ End Function
 
 
 Function Remove_Voter(name String, voter String) Uint64 
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 	
 	20  IF IS_ADDRESS_VALID(voter) == 1 THEN GOTO 30
     	21  PRINTF "Invalid voter address!"
@@ -222,9 +223,7 @@ End Function
 
 
 Function Vote_Yes(name String) Uint64
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 
 	20  DIM _voter_counter as Uint64
 	21  LET _voter_counter = LOAD(name + "_voter_counter")
@@ -248,9 +247,7 @@ End Function
 
 
 Function Vote_No(name String) Uint64
-	10  IF EXISTS(name) == 1 THEN GOTO 20
-	11  PRINTF "This poll doesn't exist!"
-	12  RETURN 1
+	10  Close_Poll(name)
 
 	20  DIM _voter_counter as Uint64
 	21  LET _voter_counter = LOAD(name + "_voter_counter")
